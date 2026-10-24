@@ -9,7 +9,7 @@ A minimalistic work/break timer for the macOS menu bar.
 - The menu shows how many work intervals you completed today.
 - About 260 KB, no dependencies. Universal: Apple Silicon and Intel, macOS 13+.
 
-<img src="docs/icon.png" width="128" alt="p-timer-mac icon">
+<img src="docs/p-timer-mac-promo.png" width="600" alt="p-timer-mac in the menu bar with its menu open">
 
 ## Installation
 
