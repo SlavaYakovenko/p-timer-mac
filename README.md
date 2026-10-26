@@ -34,7 +34,7 @@ Click the timer in the menu bar to open the menu:
 - **Completed today: N** — how many work intervals were fully completed today (informational; resets at midnight);
 - **Quit** — quit.
 
-When the work time runs out, a sound plays and the break starts right away: 5 minutes, or 15 after every 4th interval completed today. The break time is shown in gray. When the break ends, the sound plays again, the timer returns to the full work length and waits to be started manually.
+When the work time runs out, a sound plays and the break starts right away: 5 minutes, or 15 after every 4th interval completed today. The break time is shown in gray. When the break ends, the sound plays again, the timer returns to the full work length and waits to be started manually. Until you press Start, the time is shown in red, so a forgotten timer stands out.
 
 ## Building
 

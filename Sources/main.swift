@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var phase: Phase = .work
     private lazy var remaining: TimeInterval = duration
     private var endDate: Date?          // non-nil while running
+    private var breakOver = false       // a break ended and work hasn't been started yet: shown in red
     private var ticker: Timer?
 
     // Completed work sessions today; persisted so a relaunch within the same day keeps the count.
@@ -57,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func start() {
         guard endDate == nil else { return }
+        breakOver = false
         run()
     }
 
@@ -171,18 +173,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             run()
         case .rest:
             idle()
+            breakOver = true
             render()
         }
     }
 
     private func render() {
         let secs = Int(remaining.rounded(.up))
-        // No icon to save menu-bar space; the break is shown in a dimmed color instead.
+        // No icon to save menu-bar space; the break is shown dimmed, and an idle timer after a break in red.
         statusItem.button?.attributedTitle = NSAttributedString(
             string: String(format: "%02d:%02d", secs / 60, secs % 60),
             attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 0, weight: .regular),
-                .foregroundColor: phase == .work ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                .foregroundColor: breakOver ? NSColor.systemRed
+                    : phase == .work ? NSColor.labelColor : NSColor.secondaryLabelColor,
             ])
 
         let running = endDate != nil
