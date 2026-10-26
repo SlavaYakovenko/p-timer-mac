@@ -1,11 +1,12 @@
 import AppKit
 
 // p-timer-mac: menu-bar-only work/break timer: no windows, no Dock icon.
-// Work (25 min) starts only manually; break (5 min) starts automatically after work.
+// Work (25 min by default, 15-60 via the menu slider) starts only manually;
+// break (5 min, 15 min after every 4th work session of the day) starts automatically after work.
 // The menu shows how many work sessions were completed today (resets at local midnight).
 
-let workDuration: TimeInterval = 25 * 60
 let breakDuration: TimeInterval = 5 * 60
+let longBreakDuration: TimeInterval = 15 * 60
 
 enum Phase { case work, rest }
 
@@ -15,9 +16,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let stopItem = NSMenuItem(title: "Stop", action: #selector(stop), keyEquivalent: "p")
     private let resetItem = NSMenuItem(title: "Reset", action: #selector(reset), keyEquivalent: "r")
     private let doneItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let lengthLabel = NSTextField(labelWithString: "")
+    private let lengthSlider = NSSlider(value: 25, minValue: 15, maxValue: 60, target: nil, action: nil)
 
+    // Chosen work length in minutes; a work session keeps the length it started with.
+    // Clamped and snapped to the slider's 5-minute steps, so a hand-edited default can't give a 0-minute session.
+    private var workMinutes = (min(max(UserDefaults.standard.object(forKey: "workMinutes") as? Int ?? 25, 15), 60) + 2) / 5 * 5
+    private lazy var duration = TimeInterval(workMinutes * 60)   // full length of the current phase
     private var phase: Phase = .work
-    private var remaining: TimeInterval = workDuration
+    private lazy var remaining: TimeInterval = duration
     private var endDate: Date?          // non-nil while running
     private var ticker: Timer?
 
@@ -32,6 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.target = self
             menu.addItem(item)
         }
+        menu.addItem(.separator())
+        menu.addItem(lengthMenuItem())
         menu.addItem(.separator())
         doneItem.isEnabled = false
         menu.addItem(doneItem)
@@ -62,9 +71,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func reset() {
         stop()
-        phase = .work
-        remaining = workDuration
+        idle()
         render()
+    }
+
+    @objc private func lengthChanged() {
+        guard lengthSlider.integerValue != workMinutes else { return }   // a drag fires many actions per step
+        let wasFresh = fresh
+        workMinutes = lengthSlider.integerValue
+        lengthLabel.stringValue = "Work length: \(workMinutes) min"
+        UserDefaults.standard.set(workMinutes, forKey: "workMinutes")
+        if wasFresh { idle() }   // an untouched work timer is the next session, so it takes the new length now
+        render()
+    }
+
+    private func lengthMenuItem() -> NSMenuItem {
+        lengthSlider.numberOfTickMarks = 10   // 5-minute steps
+        lengthSlider.allowsTickMarkValuesOnly = true
+        lengthSlider.integerValue = workMinutes
+        lengthSlider.target = self
+        lengthSlider.action = #selector(lengthChanged)
+        lengthSlider.setAccessibilityLabel("Work length in minutes")
+        lengthSlider.frame = NSRect(x: 12, y: 4, width: 176, height: 24)
+        lengthLabel.font = .menuFont(ofSize: 0)
+        lengthLabel.stringValue = "Work length: \(workMinutes) min"
+        lengthLabel.frame = NSRect(x: 14, y: 30, width: 172, height: 17)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 50))
+        view.addSubview(lengthLabel)
+        view.addSubview(lengthSlider)
+        let item = NSMenuItem()
+        item.view = view
+        return item
+    }
+
+    private func idle() {
+        phase = .work
+        duration = TimeInterval(workMinutes * 60)
+        remaining = duration
+    }
+
+    // Untouched work timer: not running and still showing the full length.
+    private var fresh: Bool {
+        phase == .work && endDate == nil && Int(remaining.rounded(.up)) == Int(duration)
     }
 
     // Closing the lid pauses an unfinished work session; a running break just keeps counting.
@@ -118,11 +166,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             doneCount += 1
             saveDone()
             phase = .rest
-            remaining = breakDuration
+            duration = doneCount % 4 == 0 ? longBreakDuration : breakDuration
+            remaining = duration
             run()
         case .rest:
-            phase = .work
-            remaining = workDuration
+            idle()
             render()
         }
     }
@@ -139,9 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let running = endDate != nil
         // Compare whole displayed seconds, so stopping right after Start (25:00 on screen) isn't "paused".
-        let fresh = phase == .work && secs == Int(workDuration)
         startItem.isEnabled = !running
-        let paused = !running && secs < Int(phase == .work ? workDuration : breakDuration)
+        let paused = !running && secs < Int(duration)
         startItem.title = paused ? "Resume" : "Start"
         stopItem.isEnabled = running
         resetItem.isEnabled = running || !fresh
