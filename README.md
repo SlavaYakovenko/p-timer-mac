@@ -2,12 +2,12 @@
 
 A minimalistic work/break timer for the macOS menu bar.
 
-- 25 minutes of work, then a 5-minute break.
+- 25 minutes of work (adjustable from 15 to 60), then a 5-minute break; after every 4th work interval of the day the break is 15 minutes.
 - Work starts only manually; the break starts automatically when work ends.
 - Lives only in the menu bar, showing just `MM:SS` with no icon. No windows, no Dock icon, no notifications.
 - A short sound plays at the end of each interval.
 - The menu shows how many work intervals you completed today.
-- About 260 KB, no dependencies. Universal: Apple Silicon and Intel, macOS 13+.
+- About 280 KB, no dependencies. Universal: Apple Silicon and Intel, macOS 13+.
 
 <img src="docs/p-timer-mac-promo.png" width="600" alt="p-timer-mac in the menu bar with its menu open">
 
@@ -29,11 +29,12 @@ Click the timer in the menu bar to open the menu:
 
 - **Start / Resume** — start the timer, or continue after a pause;
 - **Stop** — pause;
-- **Reset** — reset to 25:00;
-- **Completed today: N** — how many 25-minute work intervals were fully completed today (informational; resets at midnight);
+- **Reset** — reset to the full work length;
+- **Work length: N min** — a slider from 15 to 60 minutes in 5-minute steps (default 25). It applies from the next work interval; an untouched timer changes right away, while a running or paused one keeps its length. The setting is remembered;
+- **Completed today: N** — how many work intervals were fully completed today (informational; resets at midnight);
 - **Quit** — quit.
 
-When the 25 minutes of work run out, a sound plays and the 5-minute break starts right away (its time is shown in gray). When the break ends, the sound plays again, the timer returns to 25:00 and waits to be started manually.
+When the work time runs out, a sound plays and the break starts right away: 5 minutes, or 15 after every 4th interval completed today. The break time is shown in gray. When the break ends, the sound plays again, the timer returns to the full work length and waits to be started manually.
 
 ## Building
 
@@ -45,5 +46,5 @@ Only Xcode Command Line Tools are required (`xcode-select --install`).
 
 Output:
 
-- `build/p-timer-mac.app` — the app (~260 KB, ~90 KB of which is the icon);
-- `build/p-timer-mac.dmg` — the installer image (~240 KB).
+- `build/p-timer-mac.app` — the app (~280 KB, ~90 KB of which is the icon);
+- `build/p-timer-mac.dmg` — the installer image (~250 KB).
