@@ -3,7 +3,8 @@ import AppKit
 // p-timer-mac: menu-bar-only work/break timer: no windows, no Dock icon.
 // Work (25 min by default, 15-60 via the menu slider) starts only manually;
 // break (5 min, 15 min after every 4th work session of the day) starts automatically after work.
-// The menu shows how many work sessions were completed today (resets at local midnight).
+// The menu shows how many work sessions were completed today (resets at local midnight,
+// which also clears the red shown for an idle timer after a break).
 
 let breakDuration: TimeInterval = 5 * 60
 let longBreakDuration: TimeInterval = 15 * 60
@@ -51,6 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
+        // Refresh the status bar on a new day even if the menu is never opened.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(dayMayHaveChanged), name: NSWorkspace.didWakeNotification, object: nil)
+        NotificationCenter.default.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) {
+            [weak self] _ in self?.dayMayHaveChanged()   // may be posted off the main thread
+        }
 
         rollDay()
         render()
@@ -123,7 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        rollDay()   // the day may have changed since the last render
+        dayMayHaveChanged()
+    }
+
+    @objc private func dayMayHaveChanged() {
+        rollDay()
         render()
     }
 
@@ -134,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard doneDay != today else { return }
         doneDay = today
         doneCount = 0
+        breakOver = false   // yesterday's finished break is no longer worth flagging
         saveDone()
     }
 
@@ -172,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             remaining = duration
             run()
         case .rest:
+            rollDay()   // before flagging, so a later day-change check can't clear today's red
             idle()
             breakOver = true
             render()
