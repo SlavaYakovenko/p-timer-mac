@@ -193,19 +193,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func render() {
         let secs = Int(remaining.rounded(.up))
-        // No icon to save menu-bar space; the break is shown dimmed, and an idle timer after a break in red.
+        let running = endDate != nil
+        // Compare whole displayed seconds, so stopping right after Start (25:00 on screen) isn't "paused".
+        let paused = !running && secs < Int(duration)
+        // No icon to save menu-bar space; the break is shown in green to catch the eye, and a timer waiting
+        // to be started in red: idle after a break, or a work session paused by Stop or by closing the lid.
         statusItem.button?.attributedTitle = NSAttributedString(
             string: String(format: "%02d:%02d", secs / 60, secs % 60),
             attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 0, weight: .regular),
-                .foregroundColor: breakOver ? NSColor.systemRed
-                    : phase == .work ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                .foregroundColor: breakOver || (paused && phase == .work) ? NSColor.systemRed
+                    : phase == .work ? NSColor.labelColor : NSColor.systemGreen,
             ])
 
-        let running = endDate != nil
-        // Compare whole displayed seconds, so stopping right after Start (25:00 on screen) isn't "paused".
         startItem.isEnabled = !running
-        let paused = !running && secs < Int(duration)
         startItem.title = paused ? "Resume" : "Start"
         stopItem.isEnabled = running
         resetItem.isEnabled = running || !fresh
