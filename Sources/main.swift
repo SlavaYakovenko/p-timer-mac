@@ -3,7 +3,8 @@ import AppKit
 // p-timer-mac: menu-bar-only work/break timer: no windows, no Dock icon.
 // Work (25 min by default, 15-60 via the menu slider) starts only manually;
 // break (5 min, 15 min after every 4th work session of the day) starts automatically after work.
-// The menu shows how many work sessions were completed today (resets at local midnight).
+// The menu shows how many work sessions were completed today (resets at local midnight,
+// which also clears the red shown for an idle timer after a break).
 
 let breakDuration: TimeInterval = 5 * 60
 let longBreakDuration: TimeInterval = 15 * 60
@@ -26,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var phase: Phase = .work
     private lazy var remaining: TimeInterval = duration
     private var endDate: Date?          // non-nil while running
+    private var breakOver = false       // a break ended and work hasn't been started yet: shown in red
     private var ticker: Timer?
 
     // Completed work sessions today; persisted so a relaunch within the same day keeps the count.
@@ -50,6 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
+        // Refresh the status bar on a new day even if the menu is never opened.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(dayMayHaveChanged), name: NSWorkspace.didWakeNotification, object: nil)
+        NotificationCenter.default.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) {
+            [weak self] _ in self?.dayMayHaveChanged()   // may be posted off the main thread
+        }
 
         rollDay()
         render()
@@ -57,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func start() {
         guard endDate == nil else { return }
+        breakOver = false
         run()
     }
 
@@ -121,7 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        rollDay()   // the day may have changed since the last render
+        dayMayHaveChanged()
+    }
+
+    @objc private func dayMayHaveChanged() {
+        rollDay()
         render()
     }
 
@@ -132,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard doneDay != today else { return }
         doneDay = today
         doneCount = 0
+        breakOver = false   // yesterday's finished break is no longer worth flagging
         saveDone()
     }
 
@@ -170,25 +184,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             remaining = duration
             run()
         case .rest:
+            rollDay()   // before flagging, so a later day-change check can't clear today's red
             idle()
+            breakOver = true
             render()
         }
     }
 
     private func render() {
         let secs = Int(remaining.rounded(.up))
-        // No icon to save menu-bar space; the break is shown in a dimmed color instead.
+        let running = endDate != nil
+        // Compare whole displayed seconds, so stopping right after Start (25:00 on screen) isn't "paused".
+        let paused = !running && secs < Int(duration)
+        // No icon to save menu-bar space; the break is shown in green to catch the eye, and a timer waiting
+        // to be started in red: idle after a break, or a work session paused by Stop or by closing the lid.
         statusItem.button?.attributedTitle = NSAttributedString(
             string: String(format: "%02d:%02d", secs / 60, secs % 60),
             attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 0, weight: .regular),
-                .foregroundColor: phase == .work ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                .foregroundColor: breakOver || (paused && phase == .work) ? NSColor.systemRed
+                    : phase == .work ? NSColor.labelColor : NSColor.systemGreen,
             ])
 
-        let running = endDate != nil
-        // Compare whole displayed seconds, so stopping right after Start (25:00 on screen) isn't "paused".
         startItem.isEnabled = !running
-        let paused = !running && secs < Int(duration)
         startItem.title = paused ? "Resume" : "Start"
         stopItem.isEnabled = running
         resetItem.isEnabled = running || !fresh
