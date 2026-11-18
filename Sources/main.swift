@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let startItem = NSMenuItem(title: "Start", action: #selector(start), keyEquivalent: "s")
     private let stopItem = NSMenuItem(title: "Stop", action: #selector(stop), keyEquivalent: "p")
     private let resetItem = NSMenuItem(title: "Reset", action: #selector(reset), keyEquivalent: "r")
+    private let completeItem = NSMenuItem(title: "Complete", action: #selector(complete), keyEquivalent: "c")
     private let doneItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let lengthLabel = NSTextField(labelWithString: "")
     private let lengthSlider = NSSlider(value: 25, minValue: 15, maxValue: 60, target: nil, action: nil)
@@ -37,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for item in [startItem, stopItem, resetItem] {
+        for item in [startItem, stopItem, resetItem, completeItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -83,6 +84,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         idle()
         render()
     }
+
+    // Count a work session that is more than half done and reset to idle work, without a break.
+    @objc private func complete() {
+        guard canComplete else { return }
+        stop()
+        rollDay()
+        doneCount += 1
+        saveDone()
+        idle()
+        render()
+    }
+
+    private var canComplete: Bool { phase == .work && duration - remaining > duration / 2 }
 
     @objc private func lengthChanged() {
         guard lengthSlider.integerValue != workMinutes else { return }   // a drag fires many actions per step
@@ -210,6 +224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startItem.title = paused ? "Resume" : "Start"
         stopItem.isEnabled = running
         resetItem.isEnabled = running || !fresh
+        completeItem.isEnabled = canComplete
+        // Minutes until Complete unlocks, rounded up (max 1, since the unlock is strictly past half).
+        let toUnlock = Int((max(60, remaining - duration / 2) / 60).rounded(.up))
+        completeItem.title = phase == .work && !canComplete ? "Complete (available in \(toUnlock) min)" : "Complete"
         doneItem.title = "Completed today: \(doneCount)"
     }
 }
