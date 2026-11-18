@@ -32,10 +32,10 @@ Click the timer in the menu bar to open the menu:
 - **Reset** — reset to the full work length;
 - **Complete** — available once more than half of the current work interval has passed (running or paused): counts it in "Completed today" and resets the timer to the full work length, without a break or sound. Until then it is disabled and shows how many minutes are left before it unlocks, e.g. "Complete (available in 3 min)";
 - **Work length: N min** — a slider from 15 to 60 minutes in 5-minute steps (default 25). It applies from the next work interval; an untouched timer changes right away, while a running or paused one keeps its length. The setting is remembered;
-- **Completed today: N** — how many work intervals were fully completed today (informational; resets at midnight);
+- **Completed today: N** — how many work intervals were completed today, by running out or with Complete (informational; resets at midnight);
 - **Quit** — quit.
 
-When the work time runs out, a sound plays and the break starts right away: 5 minutes, or 15 after every 4th interval completed today. The break time is shown in green, so a running break catches the eye. When the break ends, the sound plays again, the timer returns to the full work length and waits to be started manually. Until you press Start, the time is shown in red, so a forgotten timer stands out; the red is cleared when a new day starts. A paused work interval is shown in red too, whether you pressed Stop or closing the lid paused it, so you don't forget to resume.
+When the work time runs out, a sound plays and the break starts right away: 5 minutes, or 15 after every 4th interval today that ended with a break (intervals ended with Complete don't count toward it). The break time is shown in green, so a running break catches the eye. When the break ends, the sound plays again, the timer returns to the full work length and waits to be started manually. Until you press Start, the time is shown in red, so a forgotten timer stands out; the red is cleared when a new day starts. A paused work interval is shown in red too, whether you pressed Stop or closing the lid paused it, so you don't forget to resume.
 
 ## Building
 
