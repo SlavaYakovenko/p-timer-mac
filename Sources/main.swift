@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let startItem = NSMenuItem(title: "Start", action: #selector(start), keyEquivalent: "s")
     private let stopItem = NSMenuItem(title: "Stop", action: #selector(stop), keyEquivalent: "p")
     private let resetItem = NSMenuItem(title: "Reset", action: #selector(reset), keyEquivalent: "r")
+    private let completeItem = NSMenuItem(title: "Complete", action: #selector(complete), keyEquivalent: "c")
     private let doneItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let lengthLabel = NSTextField(labelWithString: "")
     private let lengthSlider = NSSlider(value: 25, minValue: 15, maxValue: 60, target: nil, action: nil)
@@ -33,11 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Completed work sessions today; persisted so a relaunch within the same day keeps the count.
     private var doneCount = UserDefaults.standard.integer(forKey: "doneCount")
     private var doneDay = UserDefaults.standard.integer(forKey: "doneDay")   // local day as yyyymmdd
+    // Work sessions today that ended with a break; picks the long break, so early Completes don't advance it.
+    // Defaults to doneCount for counts saved before this key existed.
+    private lazy var breakCount = UserDefaults.standard.object(forKey: "breakCount") as? Int ?? doneCount
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for item in [startItem, stopItem, resetItem] {
+        for item in [startItem, stopItem, resetItem, completeItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -49,6 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.delegate = self
+        // Fix the width to the longest Complete title, so the open menu doesn't resize as the countdown changes.
+        completeItem.title = "Complete (available in 30 min)"
+        menu.minimumWidth = menu.size.width
         statusItem.menu = menu
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
@@ -83,6 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         idle()
         render()
     }
+
+    // Count a work session that is more than half done and reset to idle work, without a break.
+    @objc private func complete() {
+        guard canComplete else { return }
+        stop()
+        rollDay()
+        doneCount += 1
+        saveDone()
+        idle()
+        render()
+    }
+
+    private var canComplete: Bool { phase == .work && duration - remaining > duration / 2 }
 
     @objc private func lengthChanged() {
         guard lengthSlider.integerValue != workMinutes else { return }   // a drag fires many actions per step
@@ -145,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard doneDay != today else { return }
         doneDay = today
         doneCount = 0
+        breakCount = 0
         breakOver = false   // yesterday's finished break is no longer worth flagging
         saveDone()
     }
@@ -152,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func saveDone() {
         UserDefaults.standard.set(doneCount, forKey: "doneCount")
         UserDefaults.standard.set(doneDay, forKey: "doneDay")
+        UserDefaults.standard.set(breakCount, forKey: "breakCount")
     }
 
     private func run() {
@@ -178,9 +200,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .work:
             rollDay()   // a session that ends after midnight counts for the new day
             doneCount += 1
+            breakCount += 1
             saveDone()
             phase = .rest
-            duration = doneCount % 4 == 0 ? longBreakDuration : breakDuration
+            duration = breakCount % 4 == 0 ? longBreakDuration : breakDuration
             remaining = duration
             run()
         case .rest:
@@ -210,6 +233,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startItem.title = paused ? "Resume" : "Start"
         stopItem.isEnabled = running
         resetItem.isEnabled = running || !fresh
+        completeItem.isEnabled = canComplete
+        // Minutes of work until Complete unlocks, rounded up and at least 1 (the unlock is strictly past half).
+        completeItem.title = phase == .work && !canComplete
+            ? "Complete (available in \(Int(max(1, ((remaining - duration / 2) / 60).rounded(.up)))) min)"
+            : "Complete"
         doneItem.title = "Completed today: \(doneCount)"
     }
 }
