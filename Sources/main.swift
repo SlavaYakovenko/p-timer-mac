@@ -2,12 +2,16 @@ import AppKit
 
 // p-timer-mac: menu-bar-only work/break timer: no windows, no Dock icon.
 // Work (25 min by default, 15-60 via the menu slider) starts only manually;
-// break (5 min, 15 min after every 4th work session of the day) starts automatically after work.
+// break (5 min by default, 5-20 via a slider; long break 15 min, 10-30, after every 4th work session
+// of the day) starts automatically after work.
 // The menu shows how many work sessions were completed today (resets at local midnight,
 // which also clears the red shown for an idle timer after a break).
 
-let breakDuration: TimeInterval = 5 * 60
-let longBreakDuration: TimeInterval = 15 * 60
+// Saved minutes, clamped and snapped to the sliders' 5-minute steps (all ranges start at a multiple of 5),
+// so a hand-edited default can't give a 0-minute session.
+func savedMinutes(_ key: String, _ def: Int, _ lo: Int, _ hi: Int) -> Int {
+    (min(max(UserDefaults.standard.object(forKey: key) as? Int ?? def, lo), hi) + 2) / 5 * 5
+}
 
 enum Phase { case work, rest }
 
@@ -16,13 +20,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let startItem = NSMenuItem(title: "Start", action: #selector(start), keyEquivalent: "s")
     private let stopItem = NSMenuItem(title: "Stop", action: #selector(stop), keyEquivalent: "p")
     private let resetItem = NSMenuItem(title: "Reset", action: #selector(reset), keyEquivalent: "r")
+    private let completeItem = NSMenuItem(title: "Complete", action: #selector(complete), keyEquivalent: "c")
     private let doneItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let lengthLabel = NSTextField(labelWithString: "")
     private let lengthSlider = NSSlider(value: 25, minValue: 15, maxValue: 60, target: nil, action: nil)
+    private let breakLabel = NSTextField(labelWithString: "")
+    private let breakSlider = NSSlider(value: 5, minValue: 5, maxValue: 20, target: nil, action: nil)
+    private let longBreakLabel = NSTextField(labelWithString: "")
+    private let longBreakSlider = NSSlider(value: 15, minValue: 10, maxValue: 30, target: nil, action: nil)
 
-    // Chosen work length in minutes; a work session keeps the length it started with.
-    // Clamped and snapped to the slider's 5-minute steps, so a hand-edited default can't give a 0-minute session.
-    private var workMinutes = (min(max(UserDefaults.standard.object(forKey: "workMinutes") as? Int ?? 25, 15), 60) + 2) / 5 * 5
+    // Chosen lengths in minutes; a session keeps the length it started with.
+    private var workMinutes = savedMinutes("workMinutes", 25, 15, 60)
+    private var breakMinutes = savedMinutes("breakMinutes", 5, 5, 20)
+    private var longBreakMinutes = savedMinutes("longBreakMinutes", 15, 10, 30)
     private lazy var duration = TimeInterval(workMinutes * 60)   // full length of the current phase
     private var phase: Phase = .work
     private lazy var remaining: TimeInterval = duration
@@ -33,22 +43,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Completed work sessions today; persisted so a relaunch within the same day keeps the count.
     private var doneCount = UserDefaults.standard.integer(forKey: "doneCount")
     private var doneDay = UserDefaults.standard.integer(forKey: "doneDay")   // local day as yyyymmdd
+    // Work sessions today that ended with a break; picks the long break, so early Completes don't advance it.
+    // Defaults to doneCount for counts saved before this key existed.
+    private lazy var breakCount = UserDefaults.standard.object(forKey: "breakCount") as? Int ?? doneCount
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for item in [startItem, stopItem, resetItem] {
+        for item in [startItem, stopItem, resetItem, completeItem] {
             item.target = self
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        menu.addItem(lengthMenuItem())
+        menu.addItem(sliderMenuItem(lengthLabel, lengthSlider, "Work length: \(workMinutes) min", workMinutes,
+                                    #selector(lengthChanged), "Work length in minutes"))
+        menu.addItem(sliderMenuItem(breakLabel, breakSlider, "Short break: \(breakMinutes) min", breakMinutes,
+                                    #selector(breakChanged), "Short break length in minutes"))
+        menu.addItem(sliderMenuItem(longBreakLabel, longBreakSlider, "Long break: \(longBreakMinutes) min",
+                                    longBreakMinutes, #selector(breakChanged), "Long break length in minutes"))
         menu.addItem(.separator())
         doneItem.isEnabled = false
         menu.addItem(doneItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.delegate = self
+        // Fix the width to the longest Complete title, so the open menu doesn't resize as the countdown changes.
+        completeItem.title = "Complete (available in 30 min)"
+        menu.minimumWidth = menu.size.width
         statusItem.menu = menu
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
@@ -75,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         endDate = nil
         ticker?.invalidate()
         ticker = nil
+        if phase == .rest { idle() }   // Stop during a break ends it: back to idle work, waiting for Start
         render()
     }
 
@@ -83,6 +105,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         idle()
         render()
     }
+
+    // Count a work session that is more than half done and reset to idle work, without a break.
+    @objc private func complete() {
+        guard canComplete else { return }
+        stop()
+        rollDay()
+        doneCount += 1
+        saveDone()
+        idle()
+        render()
+    }
+
+    private var canComplete: Bool { phase == .work && duration - remaining > duration / 2 }
 
     @objc private func lengthChanged() {
         guard lengthSlider.integerValue != workMinutes else { return }   // a drag fires many actions per step
@@ -94,20 +129,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
     }
 
-    private func lengthMenuItem() -> NSMenuItem {
-        lengthSlider.numberOfTickMarks = 10   // 5-minute steps
-        lengthSlider.allowsTickMarkValuesOnly = true
-        lengthSlider.integerValue = workMinutes
-        lengthSlider.target = self
-        lengthSlider.action = #selector(lengthChanged)
-        lengthSlider.setAccessibilityLabel("Work length in minutes")
-        lengthSlider.frame = NSRect(x: 12, y: 4, width: 176, height: 24)
-        lengthLabel.font = .menuFont(ofSize: 0)
-        lengthLabel.stringValue = "Work length: \(workMinutes) min"
-        lengthLabel.frame = NSRect(x: 14, y: 30, width: 172, height: 17)
+    // Break lengths apply from the next break; a running break keeps its length.
+    @objc private func breakChanged(_ sender: NSSlider) {
+        guard breakSlider.integerValue != breakMinutes || longBreakSlider.integerValue != longBreakMinutes
+        else { return }   // a drag fires many actions per step
+        // The long break is never shorter: crossing the other slider drags it along.
+        if longBreakSlider.integerValue < breakSlider.integerValue {
+            if sender === breakSlider { longBreakSlider.integerValue = breakSlider.integerValue }
+            else { breakSlider.integerValue = longBreakSlider.integerValue }
+        }
+        breakMinutes = breakSlider.integerValue
+        longBreakMinutes = longBreakSlider.integerValue
+        breakLabel.stringValue = "Short break: \(breakMinutes) min"
+        longBreakLabel.stringValue = "Long break: \(longBreakMinutes) min"
+        UserDefaults.standard.set(breakMinutes, forKey: "breakMinutes")
+        UserDefaults.standard.set(longBreakMinutes, forKey: "longBreakMinutes")
+    }
+
+    private func sliderMenuItem(_ label: NSTextField, _ slider: NSSlider, _ text: String, _ value: Int,
+                                _ action: Selector, _ a11y: String) -> NSMenuItem {
+        slider.numberOfTickMarks = Int(slider.maxValue - slider.minValue) / 5 + 1   // 5-minute steps
+        slider.allowsTickMarkValuesOnly = true
+        slider.integerValue = value
+        slider.target = self
+        slider.action = action
+        slider.setAccessibilityLabel(a11y)
+        slider.frame = NSRect(x: 12, y: 4, width: 176, height: 24)
+        label.font = .menuFont(ofSize: 0)
+        label.stringValue = text
+        label.frame = NSRect(x: 14, y: 30, width: 172, height: 17)
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 50))
-        view.addSubview(lengthLabel)
-        view.addSubview(lengthSlider)
+        view.addSubview(label)
+        view.addSubview(slider)
         let item = NSMenuItem()
         item.view = view
         return item
@@ -145,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard doneDay != today else { return }
         doneDay = today
         doneCount = 0
+        breakCount = 0
         breakOver = false   // yesterday's finished break is no longer worth flagging
         saveDone()
     }
@@ -152,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func saveDone() {
         UserDefaults.standard.set(doneCount, forKey: "doneCount")
         UserDefaults.standard.set(doneDay, forKey: "doneDay")
+        UserDefaults.standard.set(breakCount, forKey: "breakCount")
     }
 
     private func run() {
@@ -178,9 +233,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .work:
             rollDay()   // a session that ends after midnight counts for the new day
             doneCount += 1
+            breakCount += 1
             saveDone()
             phase = .rest
-            duration = doneCount % 4 == 0 ? longBreakDuration : breakDuration
+            duration = TimeInterval((breakCount % 4 == 0 ? longBreakMinutes : breakMinutes) * 60)
             remaining = duration
             run()
         case .rest:
@@ -210,6 +266,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startItem.title = paused ? "Resume" : "Start"
         stopItem.isEnabled = running
         resetItem.isEnabled = running || !fresh
+        completeItem.isEnabled = canComplete
+        // Minutes of work until Complete unlocks, rounded up and at least 1 (the unlock is strictly past half).
+        completeItem.title = phase == .work && !canComplete
+            ? "Complete (available in \(Int(max(1, ((remaining - duration / 2) / 60).rounded(.up)))) min)"
+            : "Complete"
         doneItem.title = "Completed today: \(doneCount)"
     }
 }
